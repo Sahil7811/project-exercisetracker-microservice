@@ -4,10 +4,11 @@ const bodyParser = require("body-parser");
 const mongoose = require("mongoose");
 const cors = require("cors");
 require("dotenv").config();
+
 const User = require("./User");
 const Exercise = require("./Exercise");
 
-// middleware
+// Middleware
 app.use(cors());
 app.use(express.static("public"));
 app.get("/", (req, res) => {
@@ -16,20 +17,20 @@ app.get("/", (req, res) => {
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(express.json());
 
+// DB Connection
 const connectDB = async () => {
   try {
     await mongoose.connect(process.env.MONGO_URI);
     console.log("✅ MongoDB connected");
   } catch (err) {
     console.error("❌ MongoDB connection error:", err.message);
-    process.exit(1); // Exit if DB connection fails
+    process.exit(1);
   }
 };
 connectDB();
 
-// routes
-// 1) create a new user and return response : username and _id
-app.post("/api/users", async function (req, res) {
+// Create new user
+app.post("/api/users", async (req, res) => {
   const { username } = req.body;
 
   if (!username) {
@@ -46,7 +47,7 @@ app.post("/api/users", async function (req, res) {
     }
 
     const newUser = new User({ username });
-    const saveUser = await newUser.save();
+    await newUser.save();
 
     res.json({ username: newUser.username, _id: newUser._id });
   } catch (err) {
@@ -55,10 +56,10 @@ app.post("/api/users", async function (req, res) {
   }
 });
 
-// 2) to get all users : username and id
-app.get("/api/users", async function (req, res) {
+// Get all users
+app.get("/api/users", async (req, res) => {
   try {
-    const users = await User.find({}, "username _id"); // Only return username and _id
+    const users = await User.find({}, "username _id");
     res.json(users);
   } catch (err) {
     console.error(err);
@@ -66,7 +67,7 @@ app.get("/api/users", async function (req, res) {
   }
 });
 
-// 3) save exercise and return response
+// Add an exercise
 app.post("/api/users/:_id/exercises", async (req, res) => {
   const userId = req.params._id;
   const { description, duration, date } = req.body;
@@ -97,7 +98,7 @@ app.post("/api/users/:_id/exercises", async (req, res) => {
     if (!user) return res.status(404).json({ error: "User not found" });
 
     const exercise = new Exercise({
-      username: user.username,
+      userId: user._id,
       description,
       duration: durationNum,
       date: exerciseDate,
@@ -118,7 +119,7 @@ app.post("/api/users/:_id/exercises", async (req, res) => {
   }
 });
 
-// 4)
+// Get exercise logs
 app.get("/api/users/:_id/logs", async (req, res) => {
   const userId = req.params._id;
   const { from, to, limit } = req.query;
@@ -127,44 +128,40 @@ app.get("/api/users/:_id/logs", async (req, res) => {
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ error: "User not found" });
 
-    // Build date filter
+    // Build date filter if applicable
     const dateFilter = {};
     if (from) {
       const fromDate = new Date(from);
-      if (fromDate.toString() !== "Invalid Date") {
-        dateFilter.$gte = fromDate;
-      }
+      if (!isNaN(fromDate)) dateFilter.$gte = fromDate;
     }
     if (to) {
       const toDate = new Date(to);
-      if (toDate.toString() !== "Invalid Date") {
-        dateFilter.$lte = toDate;
-      }
+      if (!isNaN(toDate)) dateFilter.$lte = toDate;
     }
 
-    const query = {
-      username: user.username,
-      ...(Object.keys(dateFilter).length && { date: dateFilter }),
-    };
+    // Build MongoDB query filter
+    const filter = { userId: user._id };
+    if (Object.keys(dateFilter).length > 0) {
+      filter.date = dateFilter;
+    }
 
-    let exercisesQuery = Exercise.find(query);
-
-    // Apply limit if provided
+    // Query exercises
+    let query = Exercise.find(filter).sort({ date: "asc" });
     if (limit) {
       const lim = parseInt(limit);
-      if (!isNaN(lim)) {
-        exercisesQuery = exercisesQuery.limit(lim);
-      }
+      if (!isNaN(lim)) query = query.limit(lim);
     }
 
-    const exercises = await exercisesQuery.exec();
+    const exercises = await query.exec();
 
+    // Format the log
     const log = exercises.map((e) => ({
       description: e.description,
       duration: e.duration,
       date: e.date.toDateString(),
     }));
 
+    // Respond with user logs
     res.json({
       username: user.username,
       _id: user._id,
@@ -177,6 +174,7 @@ app.get("/api/users/:_id/logs", async (req, res) => {
   }
 });
 
+// Start server
 const listener = app.listen(process.env.PORT || 3000, () => {
-  console.log("Your app is listening on port " + listener.address().port);
+  console.log("🚀 App is listening on port " + listener.address().port);
 });
